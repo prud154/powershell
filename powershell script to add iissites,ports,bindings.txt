@@ -1,0 +1,782 @@
+ 
+$appPoolNames = $OctopusParameters['AppPoolName'].Split(',')
+$appPoolIdentityType = $OctopusParameters['AppPoolIdentityType']
+if ($appPoolIdentityType -eq 3) {
+    $appPoolIdentityUser = $OctopusParameters['AppPoolIdentityUser']
+    $appPoolIdentityPassword = $OctopusParameters['AppPoolIdentityPassword']
+}
+$appPoolLoadUserProfile = [boolean]::Parse($OctopusParameters['AppPoolLoadUserProfile'])
+$appPoolAutoStart = [boolean]::Parse($OctopusParameters['AppPoolAutoStart'])
+$appPoolEnable32BitAppOnWin64 = [boolean]::Parse($OctopusParameters['AppPoolEnable32BitAppOnWin64'])
+$appPoolManagedRuntimeVersion = $OctopusParameters['AppPoolManagedRuntimeVersion']
+$appPoolManagedPipelineMode = $OctopusParameters['AppPoolManagedPipelineMode']
+$appPoolIdleTimeout = [TimeSpan]::FromMinutes($OctopusParameters['AppPoolIdleTimeoutMinutes'])
+$appPoolPeriodicRecycleTime = $OctopusParameters['AppPoolPeriodicRecycleTime']
+$appPoolMaxProcesses = [int]$OctopusParameters['AppPoolMaxProcesses']
+$appPoolRegularTimeInterval = [TimeSpan]::FromMinutes($OctopusParameters['AppPoolRegularTimeInterval'])
+$appPoolQueueLength = [int]$OctopusParameters['AppPoolQueueLength']
+$appPoolStartMode = $OctopusParameters['AppPoolStartMode']
+$appPoolCpuAction = $OctopusParameters['AppPoolCpuLimitAction']
+$appPoolCpuLimit = [int]$OctopusParameters['AppPoolCpuLimit']
+$webSiteNames = $OctopusParameters['WebSiteName'].Split(',')
+if($webSiteNames.count -eq 0)
+{
+    Write-Output "No website found. Specify atleast one website name to be created"
+    break;
+}
+#$applicationPoolName = $OctopusParameters["ApplicationPoolName"]
+$bindingProtocol = $OctopusParameters["BindingProtocol"].Split(',')
+$bindingPorts = $OctopusParameters["BindingPort"].Split(',')
+$bindingIpAddresses = $OctopusParameters["BindingIpAddresses"].Split(',')
+$bindingHost = $OctopusParameters["BindingHost"]
+$bindingSslThumbprint = $OctopusParameters["BindingSslThumbprint"]
+$webRoot = $OctopusParameters["WebRoot"]
+$iisAuthentication = $OctopusParameters["IisAuthentication"]
+$webSiteStart = $OctopusParameters["WebsiteStart"]
+ 
+ 
+$virtualPath = $OctopusParameters['VirtualPath'].TrimStart('/',' ').TrimEnd('/',' ')
+$physicalPath = $OctopusParameters['PhysicalPath']
+$setApplicationPoolSettings = [boolean]::Parse($OctopusParameters['SetApplicationPoolSettings'])
+$appPoolFrameworkVersion = $OctopusParameters["ApplicationPoolFrameworkVersion"]
+$applicationPoolIdentityType = $OctopusParameters["ApplicationPoolIdentityType"]
+$applicationPoolUsername = $OctopusParameters["ApplicationPoolUsername"]
+$applicationPoolPassword = $OctopusParameters["ApplicationPoolPassword"]
+$parentSite = $OctopusParameters['ParentSite']
+#$bindingProtocols = $OctopusParameters['BindingProtocols']
+$authentication = $OctopusParameters['AuthenticationType']
+$requireSSL = $OctopusParameters['RequireSSL']
+$clientCertificate = $OctopusParameters['ClientCertificate']
+$preloadEnabled = [boolean]::Parse($OctopusParameters['PreloadEnabled'])
+$enableAnonymous = [boolean]::Parse($OctopusParameters['EnableAnonymous'])
+$enableBasic = [boolean]::Parse($OctopusParameters['EnableBasic'])
+$enableWindows = [boolean]::Parse($OctopusParameters['EnableWindows'])
+ 
+ 
+$application = $OctopusParameters['ApplicationName']
+$username = $OctopusParameters['Username']
+$password = $OctopusParameters['Password']
+$createPhysicalPath = $OctopusParameters['CreatePhysicalPath']
+$anonymousAuthentication = "Anonymous"
+$basicAuthentication = "Basic"
+$windowsAuthentication = "Windows"
+$iissiteid = $OctopusParameters['iissiteid'].split(",")
+function Validate-Parameter {
+    Param(
+        [Parameter(Position = 0)]
+        $Parameter,
+        [Parameter(Mandatory = $true, Position = 1)]
+        [string]$parameterName,
+        [string[]]$validInput
+    )
+    if (!$parameterName -contains 'Password') {
+        Write-Host ('{0}: {1}' -f ${parameterName}, $Parameter)
+    }
+    
+    
+   if (!$Parameter) {
+      if ( $Parameter.GetType().Name -ne "Int32") {
+          Write-Error ('No value was set for {0}, and it cannot be empty' -f $parameterName)
+      }
+    }
+    
+    Write-Host "${parameterName}: ${Parameter}"
+    if (! $Parameter) {
+        write-output "$parameterName cannot be empty, please specify a value"
+    }
+    
+    if ($validInput) {
+        @($Parameter) | % { 
+            if ($validInput -notcontains $_) {
+                write-output "'$_' is not a valid input for '$parameterName'"
+            }
+        }  
+    } 
+}
+function Execute-Retry {
+    Param(
+        [Parameter(Mandatory=$true, Position=0)][ScriptBlock]$Command
+    )
+$attemptCount = 0
+$operationIncomplete = $true
+    $maxFailures = 5
+    $sleepBetweenFailures = Get-Random -minimum 1 -maximum 4
+while ($operationIncomplete -and $attemptCount -lt $maxFailures) {
+$attemptCount = ($attemptCount + 1)
+if ($attemptCount -ge 2) {
+Write-Output ('Waiting for {0} seconds before retrying ...' -f $sleepBetweenFailures)
+Start-Sleep -s $sleepBetweenFailures
+Write-Output 'Retrying ...'
+}
+try {
+& $Command
+$operationIncomplete = $false
+} catch [System.Exception] {
+if ($attemptCount -lt ($maxFailures)) {
+Write-Output ('Attempt {0} of {1} failed: {2}' -f $attemptCount,$maxFailures,$_.Exception.Message)
+}
+else {
+                Write-Host 'Failed to execute command'
+}
+}
+}
+}
+function Get-ScheduledTimes {
+    Param(
+        [Parameter(Position=0)][string]$Schedule
+    )
+    if (!$Schedule) {
+        return @()
+    }
+    $minutes = $Schedule.Split(',')
+    $minuteArrayList = New-Object System.Collections.ArrayList(,$minutes)
+    return $minuteArrayList
+}
+[System.Reflection.Assembly]::LoadFrom('C:\windows\system32\inetsrv\Microsoft.Web.Administration.dll')
+Add-PSSnapin WebAdministration -ErrorAction SilentlyContinue
+Import-Module WebAdministration -ErrorAction SilentlyContinue
+ 
+ 
+Validate-Parameter -Parameter $appPoolName -ParameterName 'Application Pool Name'
+Validate-Parameter -Parameter $appPoolIdentityType -ParameterName 'Identity Type'
+if ($appPoolIdentityType -eq 3) {
+    Validate-Parameter -Parameter $appPoolIdentityUser -ParameterName 'Identity UserName'
+    # If using Group Managed Serice Accounts, the password should be allowed to be empty
+}
+Validate-Parameter -Parameter $appPoolLoadUserProfile -parameterName 'Load User Profile'
+Validate-Parameter -Parameter $appPoolAutoStart -ParameterName 'AutoStart'
+Validate-Parameter -Parameter $appPoolEnable32BitAppOnWin64 -ParameterName 'Enable 32-Bit Apps on 64-bit Windows'
+Validate-Parameter -Parameter $appPoolManagedRuntimeVersion -ParameterName 'Managed Runtime Version'
+Validate-Parameter -Parameter $appPoolManagedPipelineMode -ParameterName 'Managed Pipeline Mode'
+Validate-Parameter -Parameter $appPoolIdleTimeout -ParameterName 'Process Idle Timeout'
+Validate-Parameter -Parameter $appPoolMaxProcesses -ParameterName 'Maximum Worker Processes'
+Validate-Parameter -Parameter $appPoolStartMode -parameterName 'Start Mode'
+Validate-Parameter -Parameter $appPoolCpuAction -parameterName 'CPU Limit Action'
+Validate-Parameter -Parameter $appPoolCpuLimit -parameterName 'CPU Limit (percent)'
+$iis = (New-Object Microsoft.Web.Administration.ServerManager)
+foreach($appPoolName in $appPoolNames){
+$pool = $iis.ApplicationPools | Where-Object {$_.Name -eq $appPoolName} | Select-Object -First 1
+if ($pool -eq $null) {
+    Write-Output ('Creating Application Pool {0}' -f $appPoolName)
+    Execute-Retry {
+        $iis = (New-Object Microsoft.Web.Administration.ServerManager)
+        $iis.ApplicationPools.Add($appPoolName)
+        $iis.CommitChanges()
+    }
+}
+else {
+    Write-Output ('Application Pool {0} already exists, reconfiguring ...' -f $appPoolName)
+}
+$list = Get-ScheduledTimes -Schedule $appPoolPeriodicRecycleTime
+Execute-Retry {
+    $iis = (New-Object Microsoft.Web.Administration.ServerManager)
+    $pool = $iis.ApplicationPools | Where-Object {$_.Name -eq $appPoolName} | Select-Object -First 1
+    Write-Output ('Setting: AutoStart = {0}' -f $appPoolAutoStart)
+    $pool.AutoStart = $appPoolAutoStart
+    Write-Output ('Setting: Enable32BitAppOnWin64 = {0}' -f $appPoolEnable32BitAppOnWin64)
+    $pool.Enable32BitAppOnWin64 = $appPoolEnable32BitAppOnWin64
+    Write-Output ('Setting: IdentityType = {0}' -f $appPoolIdentityType)
+    $pool.ProcessModel.IdentityType = $appPoolIdentityType
+    if ($appPoolIdentityType -eq 3) {
+        Write-Output ('Setting: UserName = {0}' -f $appPoolIdentityUser)
+        $pool.ProcessModel.UserName = $appPoolIdentityUser
+        if (!$appPoolIdentityPassword) {
+            Write-Output ('Setting: Password = [empty]')
+        }
+        else {
+            Write-Output ('Setting: Password = [Omitted For Security]')
+        }
+        $pool.ProcessModel.Password = $appPoolIdentityPassword
+    }
+Write-Output ('Setting: LoadUserProfile = {0}' -f $appPoolLoadUserProfile)
+    $pool.ProcessModel.LoadUserProfile = $appPoolLoadUserProfile
+    Write-Output ('Setting: ManagedRuntimeVersion = {0}' -f $appPoolManagedRuntimeVersion)
+    if ($appPoolManagedRuntimeVersion -eq 'No Managed Code') {
+        $pool.ManagedRuntimeVersion = ''
+    }
+    else {
+        $pool.ManagedRuntimeVersion = $appPoolManagedRuntimeVersion
+    }
+    Write-Output ('Setting: ManagedPipelineMode = {0}' -f $appPoolManagedPipelineMode)
+    $pool.ManagedPipelineMode = $appPoolManagedPipelineMode
+    Write-Output ('Setting: IdleTimeout = {0}' -f $appPoolIdleTimeout)
+    $pool.ProcessModel.IdleTimeout = $appPoolIdleTimeout
+    Write-Output ('Setting: MaxProcesses = {0}' -f $appPoolMaxProcesses)
+    $pool.ProcessModel.MaxProcesses = $appPoolMaxProcesses
+    Write-Output ('Setting: RegularTimeInterval = {0}' -f $appPoolRegularTimeInterval)
+    $pool.Recycling.PeriodicRestart.Time  = $appPoolRegularTimeInterval
+    Write-Output ('Setting: QueueLength = {0}' -f $appPoolQueueLength)
+    $pool.QueueLength  = $appPoolQueueLength
+    Write-Output ('Setting: CPU Limit (percent) = {0}' -f $appPoolCpuLimit)
+    ## Limit is stored in 1/1000s of one percent
+    $pool.Cpu.Limit = $appPoolCpuLimit * 1000
+    Write-Output ('Setting: CPU Limit Action = {0}' -f $appPoolCpuAction)
+    $pool.Cpu.Action = $appPoolCpuAction
+    Write-Output ('Setting: Schedule = {0}' -f $appPoolPeriodicRecycleTime)
+    $pool.Recycling.PeriodicRestart.Schedule.Clear()
+    foreach($timestamp in $list) {
+        $pool.Recycling.PeriodicRestart.Schedule.Add($timestamp)
+    }
+    if (Get-Member -InputObject $pool -Name StartMode -MemberType Properties)
+    {
+        Write-Output ('Setting: StartMode = {0}' -f $appPoolStartMode)
+        $pool.StartMode = $appPoolStartMode
+    }
+    else
+    {
+        Write-Output ('IIS does not support StartMode property, skipping this property...')
+    }
+    $iis.CommitChanges()
+}
+}
+## --------------------------------------------------------------------------------------
+## Input
+## --------------------------------------------------------------------------------------
+## --------------------------------------------------------------------------------------
+## Helpers
+## --------------------------------------------------------------------------------------
+ 
+# Helper to run a block with a retry if things go wrong
+$maxFailures = 5
+$sleepBetweenFailures = Get-Random -minimum 1 -maximum 4
+function Execute-WithRetry([ScriptBlock] $command) {
+$attemptCount = 0
+$operationIncomplete = $true
+while ($operationIncomplete -and $attemptCount -lt $maxFailures) {
+$attemptCount = ($attemptCount + 1)
+if ($attemptCount -ge 2) {
+Write-Output "Waiting for $sleepBetweenFailures seconds before retrying..."
+Start-Sleep -s $sleepBetweenFailures
+Write-Output "Retrying..."
+}
+try {
+& $command
+$operationIncomplete = $false
+} catch [System.Exception] {
+if ($attemptCount -lt ($maxFailures)) {
+Write-Output ("Attempt $attemptCount of $maxFailures failed: " + $_.Exception.Message)
+}
+else {
+   Write-Output "Failed to execute command"
+}
+}
+}
+}
+## --------------------------------------------------------------------------------------
+## Validate Input
+## --------------------------------------------------------------------------------------
+Write-Output "Validating paramters..."
+Validate-Parameter $webSiteNames -parameterName "Web Site Name"
+#Validate-Parameter $applicationPoolName -parameterName "Application Pool Name"
+Validate-Parameter $bindingProtocol -validInput @("HTTP","HTTPS") -parameterName "Protocol"
+Validate-Parameter $bindingPort -parameterName "Port"
+if($bindingProtocol.ToLower() -eq "https") {
+    Validate-Parameter $bindingSslThumbprint -parameterName "SSL Thumbprint"
+}
+$enabledIisAuthenticationOptions = $iisAuthentication -split '\s*[,;]\s*'
+Validate-Parameter $enabledIisAuthenticationOptions -validInput @($anonymousAuthentication, $basicAuthentication, $windowsAuthentication) -parameterName "IIS Authentication"
+$enableAnonymous = $enabledIisAuthenticationOptions -contains $anonymousAuthentication
+$enableBasic = $enabledIisAuthenticationOptions -contains $basicAuthentication
+$enableWindows = $enabledIisAuthenticationOptions -contains $windowsAuthentication
+## --------------------------------------------------------------------------------------
+## Configuration
+## --------------------------------------------------------------------------------------
+if (! $webRoot) {
+$webRoot = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\InetStp' -name PathWWWRoot).PathWWWRoot
+}
+$webRoot = (resolve-path $webRoot).ProviderPath
+Validate-Parameter $webRoot -parameterName "Relative Home Directory"
+$wsBindings = new-object System.Collections.ArrayList
+$count = 0
+foreach($bindingPort in $bindingPorts){
+    
+    $bindingIpAddress = $($bindingIpAddresses[$count])
+    $bindingInformation = "${bindingIpAddress}:${bindingPort}:${bindingHost}"
+    Add-PSSnapin WebAdministration -ErrorAction SilentlyContinue
+    Import-Module WebAdministration -ErrorAction SilentlyContinue
+    if($bindingProtocol[$count] -eq $null)
+    {
+        Write-Output "valid protocol (http,https,net tcp) not found for site ($count+1)"
+        break;
+    }
+    elseif(($bindingProtocol[$count] -eq 'http') -or ($bindingProtocol[$count] -eq 'https') -or ($bindingProtocol[$count] -eq 'net tcp'))
+    {
+        $bp = $bindingProtocol[$count]
+    }
+    else
+    {
+        Write-Output "not a valid protocol $($bindingProtocol[$count]). Valid protocols are: http,https,net tcp"
+        break;
+    }
+    
+    $wsBindings.Add(@{protocol="$bp";bindingInformation="$bindingInformation"}) | Out-Null
+    if (! [string]::IsNullOrEmpty($bindingSslThumbprint)) {
+       
+    
+        $sslCertificateThumbprint = $bindingSslThumbprint.Trim()
+        Write-Output "Finding SSL certificate with thumbprint $sslCertificateThumbprint"
+    
+        $certificate = Get-ChildItem Cert:\LocalMachine -Recurse | Where-Object { $_.Thumbprint -eq $sslCertificateThumbprint -and $_.HasPrivateKey -eq $true } | Select-Object -first 1
+        if (! $certificate) 
+        {
+            Write-Output "Could not find certificate under Cert:\LocalMachine with thumbprint $sslCertificateThumbprint. Make sure that the certificate is installed to the Local Machine context and that the private key is available."
+        }
+        Write-Output ("Found certificate: " + $certificate.Subject)
+        
+
+      
+$port = $bindingPort
+$sslBindingsPath = ($bindingIpAddress + "!" + $port + "!" + $bindingHost)
+Execute-WithRetry { 
+$sslBinding = get-item $sslBindingsPath -ErrorAction SilentlyContinue
+if (! $sslBinding) {
+New-Item $sslBindingsPath -Value $certificate | Out-Null
+} else {
+            Set-Item $sslBindingsPath -Value $certificate | Out-Null
+            } 
+        }
+    }
+    $count++
+}
+## --------------------------------------------------------------------------------------
+## Run
+## --------------------------------------------------------------------------------------
+pushd IIS:\
+foreach($appPoolName in $appPoolNames)
+{
+    $appPoolPath = ("IIS:\AppPools\" + $appPoolName)
+    Execute-WithRetry { 
+       Write-Output "Finding application pool $appPoolName"
+$pool = Get-Item $appPoolPath -ErrorAction SilentlyContinue
+if (!$pool) { 
+write-output "Application pool $appPoolName does not exist" 
+}
+  }
+}
+ 
+$webSiteNames
+#[int]$id = $iissiteid
+#[int]$poolcount=0                                                                                                                                                                                                                                                                        
+#foreach($webSiteName in $webSiteNames)
+for($poolcount=0;$poolcount -le $webSiteNames.count; $poolcount++)
+{
+    [int]$id = $iissiteid[$poolcount]
+    $webSiteName = $webSiteNames[$poolcount]
+    $sitePath = ("IIS:\Sites\" + $webSiteName)
+    #if(!(Test-Path $sitePath))
+    #{
+    #   New-Item -Path $physicalPath -Name $webSiteName -ItemType Directory -Force
+    #}
+    Write-Output $sitePath
+    $site = Get-Item $sitePath -ErrorAction SilentlyContinue
+    if (!$site) { 
+   Write-Output "Creating web site $webSiteName"
+        #Execute-WithRetry {
+        #Create an if statement here to take id if its within the script or take it from outside octopus paramaters
+   #$id = (dir iis:\sites | foreach {$_.id} | sort -Descending | select -first 1) + 1
+        
+   new-item "$sitePath" -bindings $($wsBindings[$poolcount]) -id $id -physicalPath $webRoot -confirm:$false
+            
+            Write-Output "Assigning website to application pool: $($appPoolNames[$poolcount])"
+       Set-ItemProperty "$sitePath" -name applicationPool -value $appPoolNames[$poolcount]
+            
+            Write-Output "Setting home directory: $webRoot"
+       Set-ItemProperty "$sitePath" -name physicalPath -value "$webRoot"
+            
+            Write-Output "Anonymous authentication enabled: $enableAnonymous"
+   Set-WebConfigurationProperty -filter '/system.webServer/security/authentication/anonymousAuthentication' -name enabled -value $($enableAnonymous) -location $WebSiteName -PSPath "IIS:\"
+            Write-Output "Basic authentication enabled: $enableBasic"
+   Set-WebConfigurationProperty -filter '/system.webServer/security/authentication/basicAuthentication' -name enabled -value $($enableBasic) -location $WebSiteName -PSPath "IIS:\"
+            Write-Output "Windows authentication enabled: $enableWindows"
+   Set-WebConfigurationProperty -filter '/system.webServer/security/authentication/windowsAuthentication' -name enabled -value $($enableWindows) -location $WebSiteName -PSPath "IIS:\"
+        #}
+    } else {
+   write-host "Web site $webSiteName already exists"
+    }
+    #$cmd = { 
+   #Write-Output "Assigning website to application pool: $($appPoolNames[$poolcount])"
+   #Set-ItemProperty $sitePath -name applicationPool -value $appPoolNames[$poolcount]
+    #}
+    #Execute-WithRetry -Command $cmd
+    #Execute-WithRetry { 
+   #Write-Output "Setting home directory: $webRoot"
+   #Set-ItemProperty $sitePath -name physicalPath -value "$webRoot"
+    #}
+    #try {
+   #Execute-WithRetry { 
+   #Write-Output "Anonymous authentication enabled: $enableAnonymous"
+   #Set-WebConfigurationProperty -filter /system.webServer/security/authentication/anonymousAuthentication -name enabled -value "$enableAnonymous" -location $WebSiteName -PSPath "IIS:\"
+   #}
+   #Execute-WithRetry { 
+   #Write-Output "Basic authentication enabled: $enableBasic"
+   #Set-WebConfigurationProperty -filter /system.webServer/security/authentication/basicAuthentication -name enabled -value "$enableBasic" -location $WebSiteName -PSPath "IIS:\"
+   #}
+   #Execute-WithRetry { 
+   #Write-Output "Windows authentication enabled: $enableWindows"
+   #Set-WebConfigurationProperty -filter /system.webServer/security/authentication/windowsAuthentication -name enabled -value "$enableWindows" -location $WebSiteName -PSPath "IIS:\"
+   #}
+    #} catch [System.Exception] {
+   #Write-Output "Authentication options could not be set. This can happen when there is a problem with your application's web.config. For example, you might be using a section that requires an extension that is not installed on this web server (such as URL Rewriting). It can also happen when you have selected an authentication option and the appropriate IIS module is not installed (for example, for Windows authentication, you need to enable the Windows Authentication module in IIS/Windows first)"
+   #throw
+    #}
+    # It can take a while for the App Pool to come to life
+    Start-Sleep -s 1
+foreach($appPoolName in $appPoolNames)
+    {
+    Execute-WithRetry { 
+   $state = Get-WebAppPoolState $appPoolNames[$webSitecount]
+   if ($state.Value -eq "Stopped") {
+   Write-Output "Application pool is stopped. Attempting to start..."
+   Start-WebAppPool $appPoolNames
+   }
+      }
+}
+    if($webSiteStart -eq $true) {
+        Execute-WithRetry { 
+       $state = Get-WebsiteState $webSiteName
+       if ($state.Value -eq "Stopped") {
+       Write-Output "Web site is stopped. Attempting to start..."
+       Start-Website $webSiteName
+       }
+        }
+    } else {
+   write-host "Not starting Web site $webSiteName"
+    }
+    popd
+    Write-Output "IIS configuration complete"
+    #$id++
+}
+ 
+## --------------------------------------------------------------------------------------
+## Input
+## --------------------------------------------------------------------------------------
+ 
+ 
+## --------------------------------------------------------------------------------------
+## Helpers
+## --------------------------------------------------------------------------------------
+# Helper to run a block with a retry if things go wrong
+$maxFailures = 5
+$sleepBetweenFailures = Get-Random -minimum 1 -maximum 4
+function Execute-WithRetry([ScriptBlock] $command) {
+    $attemptCount = 0
+    $operationIncomplete = $true
+    while ($operationIncomplete -and $attemptCount -lt $maxFailures) {
+        $attemptCount = ($attemptCount + 1)
+        if ($attemptCount -ge 2) {
+            Write-Output "Waiting for $sleepBetweenFailures seconds before retrying..."
+            Start-Sleep -s $sleepBetweenFailures
+            Write-Output "Retrying..."
+        }
+        try {
+            & $command
+            $operationIncomplete = $false
+        } catch [System.Exception] {
+            if ($attemptCount -lt ($maxFailures)) {
+                Write-Output ("Attempt $attemptCount of $maxFailures failed: " + $_.Exception.Message)
+            
+            }
+            else {
+                write-output "Failed to execute command"
+            }
+        }
+    }
+}
+## --------------------------------------------------------------------------------------
+## Configuration
+## --------------------------------------------------------------------------------------
+#Validate-Parameter $virtualPath -parameterName "Virtual path"
+#Validate-Parameter $physicalPath -parameterName "Physical path"
+if($virtualPath)
+{
+  Validate-Parameter $virtualPath -parameterName "Virtual path"
+}
+if($physicalPath)
+{
+  Validate-Parameter $physicalPath -parameterName "Physical path"
+}
+Validate-Parameter $appPoolNames -parameterName "Application pool"
+Validate-Parameter $parentSite -parameterName "Parent site"
+ 
+Add-PSSnapin WebAdministration -ErrorAction SilentlyContinue
+Import-Module WebAdministration -ErrorAction SilentlyContinue
+ 
+## --------------------------------------------------------------------------------------
+## Run
+## --------------------------------------------------------------------------------------
+Write-Host "Getting web site $parentSite"
+$site = Get-WebSite  | where { $_.Name -eq $parentSite }
+if (!$site) {
+    write-output "The web site '$parentSite' does not exist. Please create the site first."
+}
+$path = $site.PhysicalPath;
+$parts = $virtualPath -split "[/\\]"
+$name = ""
+for ($i = 0; $i -lt $parts.Length; $i++) {
+    $name = $name + "/" + $parts[$i]
+    $name = $name.TrimStart('/').TrimEnd('/')
+    if ($i -eq $parts.Length - 1) {
+        
+    }
+    elseif ([string]::IsNullOrEmpty($name) -eq $false -and $name -ne "") {
+        Write-Host "Ensuring parent exists: $name"
+        
+        $path = [IO.Path]::Combine($path, $parts[$i])
+        $app = Get-WebApplication -Name $name -Site $parentSite
+        if (!$app) {
+            $vdir = Get-WebVirtualDirectory -Name $name -site $parentSite
+            if (!$vdir) {
+                Write-Verbose "The application or virtual directory '$name' does not exist"
+                if([IO.Directory]::Exists([System.Environment]::ExpandEnvironmentVariables($path)) -eq $true)
+                {
+                    Write-Verbose "Using physical path '$path' as parent"
+                }
+                else
+                {
+                    Write-Output "Failed to ensure parent"
+                }
+            }
+            else
+            {
+                $path = $vdir.PhysicalPath
+            }
+        }
+        else
+        {
+            $path = $app.PhysicalPath
+        }
+    }
+}
+$existing = Get-WebApplication -site $parentSite -Name $name
+# Set App Pool
+foreach($appPoolName in $appPoolNames)
+{
+Execute-WithRetry { 
+Write-Verbose "Loading Application pool"
+$pool = Get-Item "IIS:\AppPools\$appPoolName" -ErrorAction SilentlyContinue
+if (!$pool) { 
+Write-Host "Application pool `"$appPoolName`" does not exist, creating..." 
+new-item "IIS:\AppPools\$appPoolName" -confirm:$false
+$pool = Get-Item "IIS:\AppPools\$appPoolName"
+} else {
+Write-Host "Application pool `"$appPoolName`" already exists"
+}
+  }
+}
+# Set App Pool Identity
+foreach($appPoolName in $appPoolNames)
+{
+Execute-WithRetry { 
+if($setApplicationPoolSettings)
+    {
+        Write-Host "Set application pool identity: $applicationPoolIdentityType"
+        if ($applicationPoolIdentityType -eq "SpecificUser") {
+            Set-ItemProperty "IIS:\AppPools\$$appPoolName" -name processModel -value @{identitytype="SpecificUser"; username="$applicationPoolUsername"; password="$applicationPoolPassword"}
+        } else {
+            Set-ItemProperty "IIS:\AppPools\$appPoolName" -name processModel -value @{identitytype="$applicationPoolIdentityType"}
+        }
+    }
+  }
+}
+# Set .NET Framework
+foreach($appPoolName in $appPoolNames)
+{
+Execute-WithRetry { 
+    if($setApplicationPoolSettings)
+    {
+        Write-Host "Set .NET framework version: $appPoolFrameworkVersion" 
+        if($appPoolFrameworkVersion -eq "No Managed Code")
+        {
+            Set-ItemProperty "IIS:\AppPools\$appPoolName" managedRuntimeVersion ""
+        }
+        else
+        {
+            Set-ItemProperty "IIS:\AppPools\$appPoolName" managedRuntimeVersion $appPoolFrameworkVersion
+        }
+     }
+   }
+}
+foreach($appPoolName in $appPoolNames)
+{
+Execute-WithRetry { 
+    ## Check if the physical path exits
+    if(!(Test-Path -Path $physicalPath)) {
+        Write-Host "Creating physical path '$physicalPath'"
+        New-Item -ItemType directory -Path $physicalPath
+    }
+    if (!$existing) {
+        Write-Host "Creating web application '$name'"
+        New-WebApplication -Site $parentSite -Name $name -ApplicationPool $appPoolName -PhysicalPath $physicalPath -force
+        Write-Host "Web application created"
+    } else {
+        Write-Host "The web application '$name' already exists. Updating physical path:"
+        Set-ItemProperty IIS:\\Sites\\$parentSite\\$name -name physicalPath -value $physicalPath
+        Write-Host "Physical path changed to: $physicalPath"
+        Set-ItemProperty IIS:\\Sites\\$parentSite\\$name -Name applicationPool -Value $appPoolName
+        Write-Output "ApplicationPool changed to: $appPoolName"
+    }
+    
+    Write-Host "Enabling '$($bindingProtocol[0])' protocols"
+    Set-ItemProperty IIS:\\Sites\\$parentSite\\$name -name enabledProtocols -value $($bindingProtocol[0])
+    $enabledIisAuthenticationOptions = $Authentication -split '\\s*[,;]\\s*'
+    try {
+    Execute-WithRetry { 
+        Write-Output "Anonymous authentication enabled: $enableAnonymous"
+        Set-WebConfigurationProperty -filter '/system.webServer/security/authentication/anonymousAuthentication' -name enabled -value $($enableAnonymous) -PSPath 'IIS:\\' -location "$parentSite/$virtualPath"
+    }    
+    
+    Execute-WithRetry { 
+        Write-Output "Windows authentication enabled: $enableWindows"
+        Set-WebConfigurationProperty -filter '/system.WebServer/security/authentication/windowsAuthentication' -name enabled -value $($enableWindows) -PSPath 'IIS:\\' -location "$parentSite/$virtualPath"
+    }
+    Execute-WithRetry { 
+        Write-Output "Basic authentication enabled: $enableBasic"
+        Set-WebConfigurationProperty -filter '/system.webServer/security/authentication/basicAuthentication' -name enabled -value $($enableBasic) -PSPath 'IIS:\\' -location "$parentSite/$virtualPath"
+    }
+    } catch [System.Exception] {
+        Write-Output "Authentication options could not be set. This can happen when there is a problem with your application's web.config. For example, you might be using a section that requires an extension that is not installed on this web server (such as URL Rewriting). It can also happen when you have selected an authentication option and the appropriate IIS module is not installed (for example, for Windows authentication, you need to enable the Windows Authentication module in IIS/Windows first)"
+        #throw
+    }
+    Set-WebConfiguration -value "None" -filter "system.webserver/security/access" -location $parentSite/$virtualPath -PSPath 'IIS:\\'
+    if ($requireSSL -ieq "True")
+    {
+        Write-Output "Require SSL enabled: $requireSSL"
+        Set-WebConfiguration -value "Ssl" -filter "system.webserver/security/access" -location "$parentSite/$virtualPath" -PSPath 'IIS:\\'
+        Write-Output "Client certificate mode: $clientCertificate"
+        if ($clientCertificate -ieq "Accept") {
+           Set-WebConfigurationProperty -filter "system.webServer/security/access" -location "$parentSite/$virtualPath" -PSPath 'IIS:\\' -name "sslFlags" -value "Ssl,SslNegotiateCert"
+        }
+        if ($clientCertificate -ieq "Require") {
+           Set-WebConfigurationProperty -filter "system.webServer/security/access" -location "$parentSite/$virtualPath" -PSPath 'IIS:\\' -name "sslFlags" -value "Ssl,SslNegotiateCert,SslRequireCert"
+        }
+    }
+    
+    try {
+        Set-ItemProperty "IIS:\\Sites\\$parentSite\\$name" -name preloadEnabled -value $preloadEnabled
+        Write-Output "Preload Enabled: $preloadEnabled"
+    } catch [System.Exception] {
+       if ($preloadEnabled) {
+            Write-Output "Preload Enabled: $preloadEnabled Could not be set. You may to install the Application Initialization feature"
+            #throw
+       }
+    }
+  }
+}
+ 
+ 
+ 
+## --------------------------------------------------------------------------------------
+## Helpers
+## --------------------------------------------------------------------------------------
+# Helper for validating input parameters
+function Confirm-Parameter([string]$parameterInput, [string[]]$validInput, $parameterName) {
+    Write-Host "${parameterName}: $parameterInput"
+    if (! $parameterInput) {
+        write-output "No value was set for $parameterName, and it cannot be empty"
+    }
+    if ($validInput) {
+        if (! $validInput -contains $parameterInput) {
+            Write-Output "'$input' is not a valid input for '$parameterName'"
+        }
+    }
+}
+# Helper to run a block with a retry if things go wrong
+$maxFailures = 5
+$sleepBetweenFailures = Get-Random -minimum 1 -maximum 4
+function Invoke-CommandWithRetry([ScriptBlock] $command) {
+    $attemptCount = 0
+    $operationIncomplete = $true
+    while ($operationIncomplete -and $attemptCount -lt $maxFailures) {
+        $attemptCount = ($attemptCount + 1)
+        if ($attemptCount -ge 2) {
+            Write-Output "Waiting for $sleepBetweenFailures seconds before retrying..."
+            Start-Sleep -s $sleepBetweenFailures
+            Write-Output "Retrying..."
+        }
+        try {
+            & $command
+            $operationIncomplete = $false
+        } catch [System.Exception] {
+            if ($attemptCount -lt ($maxFailures)) {
+                Write-Output ("Attempt $attemptCount of $maxFailures failed: " + $_.Exception.Message)
+            }
+            else {
+                write-output "Failed to execute command"
+            }
+        }
+    }
+}
+## --------------------------------------------------------------------------------------
+## Configuration
+## --------------------------------------------------------------------------------------
+Confirm-Parameter $virtualPath -parameterName "Virtual path"
+Confirm-Parameter $physicalPath -parameterName "Physical path"
+Confirm-Parameter $parentSite -parameterName "Parent site"
+if (![string]::IsNullOrEmpty($application)) {
+    $application = $application.TrimStart('/',' ').TrimEnd('/',' ')
+}
+Add-PSSnapin WebAdministration -ErrorAction SilentlyContinue
+Import-Module WebAdministration -ErrorAction SilentlyContinue
+ 
+## --------------------------------------------------------------------------------------
+## Run
+## --------------------------------------------------------------------------------------
+Write-Host "Getting web site $parentSite"
+$site = Get-Website -name $parentSite
+if (!$site) {
+    Write-Output "The web site '$parentSite' does not exist. Please create the site first."
+}
+$virtualFullPath = $virtualPath
+if ($application) {
+    Write-Host "Verifying existance of application $application"
+    $app = Get-WebApplication -site $parentSite -name $application
+    if (!$app) {
+        Write-Output "The application '$parentSite' does not exist. Please create the application first."
+    } else {
+        $virtualFullPath = $application + '/' + $virtualPath
+    }
+}
+# If the physical path down not exist and $createPhysicalPath is true,
+# then attempt create it, otherwise throw an error.
+if (!(Test-Path $physicalPath)) {
+    if ($createPhysicalPath) {
+        try {
+            Write-Host "Attempting to create physical path '$physicalPath'"
+            New-Item -Type Directory -Path $physicalPath -Force
+        } catch {
+            write-output "Couldn't create physical path!"
+        }
+    } else {
+        Write-Output "Physical path does not exist!"
+    }
+}
+# This needs to be improved, especially given applications can be nested.
+if ($application) {
+    $existing = Get-WebVirtualDirectory -site $parentSite -Application $application -Name $virtualPath
+} else {
+    $existing = Get-WebVirtualDirectory -site $parentSite -Name $virtualPath
+}
+Invoke-CommandWithRetry {
+    $virtualDirectoryPath = "IIS:\Sites\$parentSite\$virtualFullPath"
+    if (!$existing) {
+        Write-Host "Creating virtual directory '$virtualPath'"
+        New-Item $virtualDirectoryPath -type VirtualDirectory -physicalPath $physicalPath
+        Write-Host "Virtual directory created"
+    }
+    else {
+        Write-Host "The virtual directory '$virtualPath' already exists. Checking physical path."
+        $currentPath = (Get-ItemProperty $virtualDirectoryPath).physicalPath
+        Write-Host "Physical path currently set to $currentPath"
+        if ([string]::Compare($currentPath, $physicalPath, $True) -ne 0) {
+            Set-ItemProperty $virtualDirectoryPath -name physicalPath -value $physicalPath
+            Write-Host "Physical path changed to $physicalPath"
+        }
+    }
+    ## Set vdir pass-through credentails, if applicable
+    if (![string]::IsNullOrEmpty($username) -and ![string]::IsNullOrEmpty($password)) {
+        Write-Host "Setting Pass-through credentials for username '$username'"
+        Set-ItemProperty $virtualDirectoryPath -Name userName -Value $username
+        Set-ItemProperty $virtualDirectoryPath -Name password -Value $password
+        Write-Host "Pass-through credentials set"
+    }
+} 

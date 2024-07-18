@@ -1,0 +1,515 @@
+# Get installed version of Powershell
+$PSVersionTable.PSVersion;
+
+#Disable Server manager auto-startup
+Get-ScheduledTask -TaskName ServerManager | Disable-ScheduledTask -Verbose;
+
+# Set data drive var
+GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'" | % { if ($_.DeviceID -eq 'D:') { $dataDrive = $_.DeviceID;}; if ($_.DeviceID -eq 'E:') { $dataDrive = $_.DeviceID;}; }
+#Create General Directories
+@('Temp') | % {New-Item -ItemType "directory" -path "$ENV:HOMEDRIVE\$_" -Force}
+#@('HBCApps','Temp','Installation','Utilities\Scripts','Security') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+@('Temp','Installation','Utilities\Scripts') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+
+$InstallPath="$dataDrive\installation";
+
+# Start Windows FW service, disable all profiles and Allow RDP
+start-service -name MpsSvc;
+netsh advfirewall set allprofiles state off;
+netsh advfirewall firewall set rule group="remote desktop" new enable=Yes;
+
+# Configure extra IP addresses
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3)); $NicName = 'Ethernet0';
+$subnetOct='10.100.19.';  #PRD DMZ Env
+#$subnetOct='10.100.22.';  #XRE DMZ Env
+$subnetMsk='255.255.255.0';
+write "Updating $NicName on $env:computername"
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+		'176' { @('190','191','192','193','194','195','196') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+		'430' { @('100','101') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+        '510' { @('110','111','112','113','114') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+        '512' { @('120','121','122') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}		
+        '513' { @('130','131') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+        '514' { @('140','141') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}        
+        '517' { @('160','161','162') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+        '521' { @('170','171','172','173','174') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+		'523' { @('180','181') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+    }
+}
+
+$subnetOct='10.100.4.';  #PRD Int Env
+#$subnetOct='10.100.6.';  #XRE Int Env
+write "Updating $NicName on $env:computername"
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+		'175' { @('160','161','162','163') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+        '520' { @('100','101','102') | % { netsh.exe interface ipv4 add address $NicName "$subnetOct$_" $subnetMsk; }}
+    }
+}
+
+#Show addresses added
+Sleep 10; 
+netsh.exe interface ip show add $NicName;
+
+
+#if App server:
+#@('Hallmark.Apps','Hallmark.Apps.Logging','PGP','Oracle32','Oracle64') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+
+#if WEB server:
+@('Inetpub\wwwroot','WebLogs','WSLogging') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3));
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+		{ $_ -in '510','521' } {
+			#if Portal [IRIS]
+			@('Inetpub\wwwroot\uploads') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+		}
+		'175' {
+			#if Portal [IRIS Internal WS]
+			@('Inetpub\wwwroot\intws') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+		}
+		'517' {
+			#if Portal [EXTWS]
+			@('Inetpub\wwwroot\extws') | % {New-Item -ItemType "directory" -path "$dataDrive\$_" -Force}
+		}
+	}
+}
+
+# Open explorer for user
+Start "$InstallPath"
+
+## Run this to get installed WindowsFeature package listing ###
+###  (Get-WindowsFeature | ? { $_.installed -eq "Installed" }).Name  ###
+## Install WindowsFeature packages 
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3));
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+		{ $_ -in '510','513','514','517','520','521' } {
+			$ServerFeature = @("Application-Server","AS-NET-Framework","AS-TCP-Port-Sharing","AS-WAS-Support","AS-HTTP-Activation","AS-Named-Pipes","AS-TCP-Activation","FileAndStorage-Services","File-Services","FS-FileServer","Storage-Services","Web-Server","Web-WebServer","Web-Common-Http","Web-Default-Doc","Web-Dir-Browsing","Web-Http-Errors","Web-Static-Content","Web-Http-Redirect","Web-Health","Web-Http-Logging","Web-Log-Libraries","Web-Request-Monitor","Web-Http-Tracing","Web-Performance","Web-Stat-Compression","Web-Dyn-Compression","Web-Security","Web-Filtering","Web-Client-Auth","Web-Cert-Auth","Web-IP-Security","Web-Url-Auth","Web-Windows-Auth","Web-App-Dev","Web-Net-Ext","Web-Net-Ext45","Web-ASP","Web-Asp-Net","Web-Asp-Net45","Web-ISAPI-Ext","Web-ISAPI-Filter","Web-Mgmt-Tools","Web-Mgmt-Console","Web-Mgmt-Compat","Web-Metabase","Web-Lgcy-Mgmt-Console","Web-WMI","Web-Scripting-Tools","Web-Mgmt-Service","NET-Framework-Features","NET-Framework-Core","NET-HTTP-Activation","NET-Non-HTTP-Activ","NET-Framework-45-Features","NET-Framework-45-Core","NET-Framework-45-ASPNET","NET-WCF-Services45","NET-WCF-HTTP-Activation45","NET-WCF-MSMQ-Activation45","NET-WCF-Pipe-Activation45","NET-WCF-TCP-Activation45","NET-WCF-TCP-PortSharing45","MSMQ","MSMQ-Services","MSMQ-Server","RSAT","RSAT-Feature-Tools","RSAT-SMTP","RSAT-Role-Tools","RSAT-AD-Tools","RSAT-AD-PowerShell","RSAT-ADDS","RSAT-AD-AdminCenter","RSAT-ADDS-Tools","RSAT-ADLDS","RSAT-Hyper-V-Tools","Hyper-V-Tools","Hyper-V-PowerShell","RSAT-RDS-Tools","UpdateServices-RSAT","UpdateServices-API","UpdateServices-UI","FS-SMB1","User-Interfaces-Infra","Server-Gui-Mgmt-Infra","Server-Gui-Shell","PowerShellRoot","PowerShell","PowerShell-V2","PowerShell-ISE","WAS","WAS-Process-Model","WAS-NET-Environment","WAS-Config-APIs","WoW64-Support")
+		}
+		'175' {
+			$ServerFeature = @("AS-WAS-Support","AS-TCP-Activation","AS-Named-Pipes","AS-Dist-Transaction","AS-Incoming-Trans","AS-Outgoing-Trans","File-Services","FS-FileServer","Web-Server","Web-WebServer","Web-Common-Http","Web-Static-Content","Web-Default-Doc","Web-Dir-Browsing","Web-Http-Errors","Web-Http-Redirect","Web-App-Dev","Web-ASP","Web-Asp-Net","Web-Asp-Net45","Web-Net-Ext","Web-ISAPI-Ext","Web-ISAPI-Filter","Web-Health","Web-Http-Logging","Web-Log-Libraries","Web-Request-Monitor","Web-Http-Tracing","Web-Security","Web-Filtering","Web-Performance","Web-Stat-Compression","Web-Mgmt-Tools","Web-Mgmt-Console","Web-Scripting-Tools","NET-Framework","NET-Framework-Core","NET-Win-CFAC","NET-HTTP-Activation","NET-Non-HTTP-Activ","NET-WCF-Services45","NET-WCF-HTTP-Activation45","NET-WCF-TCP-Activation45","NET-WCF-TCP-PortSharing45","RSAT","RSAT-Role-Tools","RSAT-Web-Server","PowerShell-ISE","WAS","WAS-Process-Model","WAS-NET-Environment","WAS-Config-APIs")
+		}
+		'176' {
+			$ServerFeature = @("AS-WAS-Support","AS-TCP-Activation","AS-Named-Pipes","File-Services","FS-FileServer","Web-Server","Web-WebServer","Web-Common-Http","Web-Static-Content","Web-Default-Doc","Web-Dir-Browsing","Web-Http-Errors","Web-Http-Redirect","Web-App-Dev","Web-Asp-Net","Web-Net-Ext","Web-ISAPI-Ext","Web-ISAPI-Filter","Web-Health","Web-Http-Logging","Web-Request-Monitor","Web-Http-Tracing","Web-Security","Web-Windows-Auth","Web-Filtering","Web-Performance","Web-Stat-Compression","Web-Mgmt-Tools","Web-Mgmt-Console","Web-Scripting-Tools","Web-Mgmt-Compat","Web-Metabase","NET-Framework","NET-Framework-Core","NET-Win-CFAC","NET-HTTP-Activation","NET-Non-HTTP-Activ","NET-WCF-Services45","NET-WCF-HTTP-Activation45","NET-WCF-TCP-Activation45","NET-WCF-TCP-PortSharing45","Desktop-Experience","Ink-Handwriting","IH-Ink-Support","RSAT","RSAT-Role-Tools","RSAT-Web-Server","Telnet-Client","PowerShell-ISE","WAS","WAS-Process-Model","WAS-NET-Environment","WAS-Config-APIs")
+		}
+		'523' {
+			$ServerFeature = @("FileAndStorage-Services","File-Services","FS-FileServer","Storage-Services","Web-Server","Web-WebServer","Web-Common-Http","Web-Default-Doc","Web-Dir-Browsing","Web-Http-Errors","Web-Static-Content","Web-Http-Redirect","Web-Health","Web-Http-Logging","Web-Request-Monitor","Web-Performance","Web-Stat-Compression","Web-Security","Web-Filtering","Web-Windows-Auth","Web-App-Dev","Web-Net-Ext","Web-Net-Ext45","Web-Asp-Net45","Web-ISAPI-Ext","Web-ISAPI-Filter","Web-Mgmt-Tools","Web-Mgmt-Console","Web-Mgmt-Compat","Web-Metabase","NET-Framework-Features","NET-Framework-Core","NET-HTTP-Activation","NET-Non-HTTP-Activ","NET-Framework-45-Features","NET-Framework-45-Core","NET-Framework-45-ASPNET","NET-WCF-Services45","NET-WCF-HTTP-Activation45","NET-WCF-MSMQ-Activation45","NET-WCF-Pipe-Activation45","NET-WCF-TCP-Activation45","NET-WCF-TCP-PortSharing45","MSMQ","MSMQ-Services","MSMQ-Server","FS-SMB1","User-Interfaces-Infra","Server-Gui-Mgmt-Infra","Server-Gui-Shell","Windows-Identity-Foundation","PowerShellRoot","PowerShell","PowerShell-V2","PowerShell-ISE","WAS","WAS-Process-Model","WAS-NET-Environment","WAS-Config-APIs","WoW64-Support")
+		}
+		'512' {
+			$ServerFeature = @("Application-Server","AS-NET-Framework","AS-Web-Support","FileAndStorage-Services","File-Services","FS-FileServer","Storage-Services","Web-Server","Web-WebServer","Web-Common-Http","Web-Default-Doc","Web-Dir-Browsing","Web-Http-Errors","Web-Static-Content","Web-Http-Redirect","Web-Health","Web-Http-Logging","Web-Custom-Logging","Web-Log-Libraries","Web-Request-Monitor","Web-Performance","Web-Stat-Compression","Web-Dyn-Compression","Web-Security","Web-Filtering","Web-Basic-Auth","Web-Client-Auth","Web-Digest-Auth","Web-Cert-Auth","Web-IP-Security","Web-Url-Auth","Web-Windows-Auth","Web-App-Dev","Web-Net-Ext45","Web-ASP","Web-Asp-Net45","Web-ISAPI-Ext","Web-ISAPI-Filter","Web-Mgmt-Tools","Web-Mgmt-Console","Web-Scripting-Tools","NET-Framework-45-Features","NET-Framework-45-Core","NET-Framework-45-ASPNET","NET-WCF-Services45","NET-WCF-HTTP-Activation45","NET-WCF-MSMQ-Activation45","NET-WCF-Pipe-Activation45","NET-WCF-TCP-Activation45","NET-WCF-TCP-PortSharing45","MSMQ","MSMQ-Services","MSMQ-Server","FS-SMB1","User-Interfaces-Infra","Server-Gui-Mgmt-Infra","Server-Gui-Shell","PowerShellRoot","PowerShell","PowerShell-ISE","WAS","WAS-Process-Model","WAS-Config-APIs","WoW64-Support")
+		}
+		'430' {
+			$ServerFeature = @("FileAndStorage-Services","File-Services","FS-FileServer","Storage-Services","Web-Server","Web-WebServer","Web-Common-Http","Web-Default-Doc","Web-Dir-Browsing","Web-Http-Errors","Web-Static-Content","Web-Health","Web-Http-Logging","Web-Performance","Web-Stat-Compression","Web-Security","Web-Filtering","Web-Basic-Auth","Web-App-Dev","Web-Net-Ext","Web-Net-Ext45","Web-Asp-Net","Web-Asp-Net45","Web-ISAPI-Ext","Web-ISAPI-Filter","Web-Mgmt-Tools","Web-Mgmt-Console","Web-Scripting-Tools","NET-Framework-Features","NET-Framework-Core","NET-Framework-45-Features","NET-Framework-45-Core","NET-Framework-45-ASPNET","NET-WCF-Services45","NET-WCF-HTTP-Activation45","NET-WCF-TCP-PortSharing45","MSMQ","MSMQ-Services","MSMQ-Server","FS-SMB1","User-Interfaces-Infra","Server-Gui-Mgmt-Infra","Server-Gui-Shell","PowerShellRoot","PowerShell","PowerShell-V2","PowerShell-ISE","WAS","WAS-Process-Model","WAS-NET-Environment","WAS-Config-APIs","WoW64-Support")
+		}
+	}
+	# Import WindowsFeatures to new server
+	Foreach ($feature in $ServerFeature) {
+		if ($feature.contains("NET-Framework")) {
+			$SourcesDir = "";
+			if (($env:USERDNSDOMAIN).ToLower() -eq "hbc.local") {
+				$SourcesDir ='\\HBCSMB5045.hbc.local\install\sources\sxs';
+			}
+			if (($env:USERDNSDOMAIN).ToLower() -eq "hbc.dmz") {
+				$SourcesDir = '\\DMZSMB5046.hbc.dmz\install\sources\sxs';
+			}
+			Install-WindowsFeature -Name $feature -source "$SourcesDir"
+		} 
+		else {
+			Install-WindowsFeature -Name $feature
+		} 
+	}
+}
+
+# reboot server to seat functions
+sleep 15; Restart-Computer -Force;
+
+
+# Install GCCcrypt (If WEB or APP server)
+# Find Files to complete this step: Copy Files to server
+GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'" | % { if ($_.DeviceID -eq 'D:') { $dataDrive = $_.DeviceID;}; if ($_.DeviceID -eq 'E:') { $dataDrive = $_.DeviceID;}; }
+#(GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'").DeviceID | % { if ($_ -eq 'D:') { $dataDrive = $_;}; if ($_ -eq 'E:') { $dataDrive = $_;}; }
+
+$InstallPath="$dataDrive\installation"; 
+$basepath="$InstallPath\WebServer_Build_Requirements";
+
+#After Reboot copy down required packages
+if (($env:USERDNSDOMAIN).ToLower() -eq "hbc.local") {
+	robocopy \\HBCSMB5045.hbc.local\KD_DL_Target\WebServer_Build_Requirements "$basepath" /mir
+}
+if (($env:USERDNSDOMAIN).ToLower() -eq "hbc.dmz") {
+	robocopy \\DMZSMB5046.hbc.dmz\KD_DL_Target\WebServer_Build_Requirements "$basepath" /mir
+}
+
+cd $basepath;
+
+#For IRIS Portal (510, 520 and 521) Servers  only
+Start-Process "msiexec.exe" -ArgumentList @("/i `"$pwd\URL-Rewrite\rewrite_amd64.msi`"","/passive","/norestart","/log `"$pwd\URL-Rewrite_rewrite_amd64.msi.log`"") -Wait -PassThru;
+Start-Process "msiexec.exe" -ArgumentList @("/i `"$pwd\INFRA\SQLSysClrTypes_2012_x64.msi`"","/passive","/norestart","/log `"$pwd\INFRA_SQLSysClrTypes_2012_x64.msi.log`"") -Wait -PassThru;
+Start-Process "msiexec.exe" -ArgumentList @("/i `"$pwd\INFRA\SQL_ReportViewer_2012.msi`"","/passive","/norestart","/log `"$pwd\INFRA_SQL_ReportViewer_2012.msi.log`"") -Wait -PassThru;
+
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3));
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+		{ $_ -in '176','510','520','521' } {
+			#Install other Programs
+			#For IRIS Portal IRIS Portal (510, 520 and 521) and CFS (176) Servers only
+			Start-Process "$pwd\INFRA\AccessDatabaseEngine_2010_x86.exe" -ArgumentList "/norestart /passive" -WorkingDirectory "$env:temp" -Wait -PassThru -NoNewWindow;
+		}
+		'176' {
+			#For CFS (176) Servers only
+			Start-Process "msiexec.exe" -ArgumentList @("/i `"$pwd\Crystal_Reports\V13_0_23\CRRuntime_32bit_13_0_23.msi`"","/passive","/norestart","/log `"$pwd\Crystal_Reports_CRRuntime_32bit_13_0_23.msi.log`"") -Wait -PassThru;
+			Start-Process "msiexec.exe" -ArgumentList @("/i `"$pwd\Crystal_Reports\V13_0_23\CRRuntime_64bit_13_0_23.msi`"","/passive","/norestart","/log `"$pwd\Crystal_Reports_CRRuntime_64bit_13_0_23.msi.log`"") -Wait -PassThru;
+		}
+	}
+}
+
+#All other server types
+Start-Process "msiexec.exe" -ArgumentList @("/i `"$pwd\Octopus\Octopus.Tentacle.3.22.0-x64.msi`"","/passive","/log `"$pwd\Octopus.Tentacle.3.22.0-x64.msi.log`"","RUNMANAGERONEXIT=no","INSTALLLOCATION=`"D:\Program Files\Octopus Deploy`"") -Wait -PassThru;
+Start-Process "$pwd\INFRA\AspNetMVC4Setup.exe" -Wait -ArgumentList "/norestart /passive" -WorkingDirectory "$env:temp" -PassThru -NoNewWindow;
+
+## Octopus configuration script
+$MyAPIKey = 'API-XXXxxContainsMyPrivateKeyxxXX';
+#$CurrentEnv = 'PRD';
+$CurrentEnv = 'XRE'; #$CurrentEnv = 'DEV';
+& "D:\Program Files\Octopus Deploy\Tentacle.exe" create-instance --instance "Tentacle" --config "D:\Octopus\Tentacle.config"
+& "D:\Program Files\Octopus Deploy\Tentacle.exe" new-certificate --instance "Tentacle" --if-blank
+& "D:\Program Files\Octopus Deploy\Tentacle.exe" configure --instance "Tentacle" --reset-trust
+& "D:\Program Files\Octopus Deploy\Tentacle.exe" configure --instance "Tentacle" --app "D:\HBCApps" --port "10933" --noListen "True"
+& "D:\Program Files\Octopus Deploy\Tentacle.exe" polling-proxy --instance "Tentacle" --proxyEnable "False" --proxyUsername "" --proxyPassword "" --proxyHost "" --proxyPort ""
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3));
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+		{$_ -in '510','521'} { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "IrisWebApp" --role "SecureUpdate" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'513' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "ApiWebSvc" --role "GoldDigger" --role "GoldDiggerTaskRunner" --role "SecureUpdate" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'514' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "ApiWebSvc" --role "GoldDigger" --role "SecureUpdate" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'517' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "ExtWebSvc" --role "SecureUpdate" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'512' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "Content" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'520' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "IrisInternalAdmin" --role "SecureUpdate" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'175' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "CoreBusSvc" --role "CoreWebSvc"  --role "IntWebSvc" --role "IrisWebTest" --role "SystemStatus" --role "SecureUpdate" --role "LogFileCleanup" --policy "Default Machine Policy" }
+		'176' { & "D:\Program Files\Octopus Deploy\Tentacle.exe" register-with --instance "Tentacle" --server "https://deploy.hbc.local" --name "$env:Computername" --comms-style "TentacleActive" --server-comms-port "10943" --force --apiKey "$MyAPIKey" --environment "$CurrentEnv" --role "CFSWebApp" --role "LogFileCleanup" --policy "Default Machine Policy" }
+	}
+}
+& "D:\Program Files\Octopus Deploy\Tentacle.exe" service --instance "Tentacle" --install --stop --start
+
+## Not needed - set through GPO
+# Set global proxy settings (if required)
+#netsh.exe winhttp set proxy 10.100.18.31:80 "<local>;localhost;10.100.*.*;*.hallmarkbusiness.com;*.hallmarkbusinessconnections.com;*.businessgreetings.com*.hmkbc.com;*.hbc.local;*.hbc.dmz"
+#netsh.exe winhttp show proxy
+
+
+GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'" | % { if ($_.DeviceID -eq 'D:') { $dataDrive = $_.DeviceID;}; if ($_.DeviceID -eq 'E:') { $dataDrive = $_.DeviceID;}; }
+#(GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'").DeviceID | % { if ($_ -eq 'D:') { $dataDrive = $_;}; if ($_ -eq 'E:') { $dataDrive = $_;}; }
+#Add site and decryption certificates
+#Set BasePath
+$InstallPath="$dataDrive\installation";  $basepath="$InstallPath\WebServer_Build_Requirements\Certs"; 
+$pwdString = '{Stored in Keeper}';
+#Internal SSO Trust Cert
+$certpwd = ConvertTo-SecureString -String $pwdString -Force –AsPlainText
+#$certname='hmki_prd_sso_cert_sha1'; #Prod ONLY!!!
+$certname='hmki_nonprd_sso_cert_sha1'; #NonProd ONLY!!!
+Import-PfxCertificate -FilePath "$basepath\$certname.pfx" -CertStoreLocation cert:\LocalMachine\My -Exportable -Password $certpwd ;
+gci cert:\LocalMachine\My
+
+#Deployed via octopus
+#Internal *.hb.com
+#$pwdString = '{Stored in Keeper}';
+#$certpwd = ConvertTo-SecureString -String $pwdString -Force –AsPlainText
+#$certname='star_hallmarkbusiness_com_int_sha256'
+#Import-PfxCertificate -FilePath "$basepath\$certname.pfx" -CertStoreLocation cert:\LocalMachine\My -Exportable -Password $certpwd ;
+#gci cert:\LocalMachine\My
+
+#Apply IIS settings to the new server
+#For Portal, CFS and Web servers - remove default app pools from servers
+@('.NET v2.0','.NET v2.0 Classic','.NET v4.5','.NET v4.5 Classic','ASP.NET v4.0','ASP.NET v4.0 Classic','Classic .NET AppPool') | % { Remove-WebAppPool -name $_; }
+#start "$ENV:HOMEDRIVE\windows\System32\inetsrv\inetmgr.exe"
+iisreset
+
+#Setting WebLog Dir
+(GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'").DeviceID | % { if ($_ -eq 'D:') {$dataDrive=$_;}; if ($_ -eq 'E:') {$dataDrive=$_;}; }
+Import-Module WebAdministration
+$logdir="$dataDrive\WebLogs";
+Set-WebConfigurationProperty "/system.applicationHost/sites/siteDefaults" -name logfile.directory -value $logdir
+Set-WebConfigurationProperty "/system.WebServer/security/authentication/AnonymousAuthentication" -name username -value "" -PSPath iis:
+# Add X-Forwarded_for - Client IP address logging
+Add-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter "system.applicationHost/sites/siteDefaults/logFile/customFields" -name "." -value @{logFieldName='x-forwarded-for';sourceName='X-Forwarded-For';sourceType='RequestHeader'}
+# Check for  X-Forwarded_for - Client IP address logging
+(Get-WebConfigurationProperty -pspath 'MACHINE/WEBROOT/APPHOST' -filter "system.applicationHost/sites/siteDefaults/logFile/customFields" -name ".").Collection
+
+#Copy over Cybersource Keys
+$basepath="$InstallPath\WebServer_Build_Requirements";cd $basepath;
+$destfldr='CyberSource';
+robocopy "$basepath\$destfldr" "$dataDrive\Security\$destfldr" /e
+
+<##
+	Deploy Applications via Octopus!!!
+##>
+
+#Get apppools and assign Permissions to the required folders
+Import-Module WebAdministration;
+"Adding Permissions for IIS_IUSRS user group";
+@("$ENV:HOMEDRIVE\inetpub\logs","$dataDrive\WebLogs","$dataDrive\WSLogging") | % {
+    $Parms = @("`"$_`"","/grant","IIS_IUSRS:(OI)(CI)M","/T"); icacls.exe $Parms;
+}
+
+@(gci IIS:\AppPools | ? {$_.Name -ne 'DefaultAppPool'} | select name) | % {
+    $PoolName="IIS APPPOOL\$($_.name)";
+    write-warning "Adding Permissions for $PoolName";
+    if ($true) {
+        $Parms = @("localgroup","IIS_IUSRS","/add","`"$PoolName`""); net.exe $Parms;
+    }
+    ## All web servers
+    if ($true) {
+        @("$dataDrive\WebLogs","$dataDrive\WSLogging","$dataDrive\Security\CyberSource") | % {
+            "Granting permission to $_"
+            $Parms = @("`"$_`"","/grant","`"$PoolName`":(OI)(CI)M","/T"); icacls.exe $Parms;
+        }
+    }
+	## Grant Perms to IIS Pools to run IRIS and EXTWS
+    $Last3 = $(($env:computername).substring($($env:computername).length - 3, 3))
+    if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+        switch ($Last3) {
+            {$_ -in '510','521'} {            #If IRIS Portal
+                @("$dataDrive\Inetpub\wwwroot\uploads") | % {
+                    "Granting permission to $_"; $Parms = @("`"$_`"","/grant","`"$PoolName`":(OI)(CI)M","/T"); icacls.exe $Parms;
+                }
+            }
+            '520' {            #If IRIS Intadm
+                @("$dataDrive\Inetpub\wwwroot\iris.intadm") | % {
+                    "Granting permission to $_"; $Parms = @("`"$_`"","/grant","`"$PoolName`":(OI)(CI)M","/T"); icacls.exe $Parms;
+                }
+            }
+            '517' {            #If EXTWS
+                @("$dataDrive\Inetpub\wwwroot\extws") | % {
+                    "Granting permission to $_"; $Parms = @("`"$_`"","/grant","`"$PoolName`":(OI)(CI)M","/T"); icacls.exe $Parms;
+                }
+            }
+        }
+    }
+}
+
+# Install HBCConfigKey or HbcNonProdConfigKey - Run on 510, 521, 517, 520, 513, 514, 175, 176
+(GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'").DeviceID | % { if ($_ -eq 'D:') {$dataDrive=$_;}; if ($_ -eq 'E:') {$dataDrive=$_;}; }
+$InstallPath="$dataDrive\installation";  $basepath="$InstallPath\WebServer_Build_Requirements";
+$KeyPath = "$basepath\HBC_Config_Key";
+#$KeyName = "HbcConfigKey";
+$KeyName = "HbcNonProdConfigKey";
+$ASPNETApp = "$ENV:HOMEDRIVE\Windows\Microsoft.NET\Framework\v4.0.30319\aspnet_regiis.exe";
+$CommandString = "$ASPNETApp -pi `"$KeyName`" $KeyPath\$($KeyName).xml";
+Invoke-Expression "$CommandString";
+gci "$($env:windir)\system32\Microsoft\Protect\S-1-5-18" -Attributes Hidden
+
+# Get apppools and assign Permissions to the imported encryption key
+
+Import-Module WebAdministration;
+#$KeyName = "HbcConfigKey";
+$KeyName = "HbcNonProdConfigKey";
+$ASPNETApp="$ENV:HOMEDRIVE\Windows\Microsoft.NET\Framework\v4.0.30319\aspnet_regiis.exe";
+# Add BUILTIN\IIS_IUSRS user group for access to the key
+$UserOrGroupName="BUILTIN\IIS_IUSRS";
+"Adding Permissions for $UserOrGroupName"; 
+$CommandString = "$ASPNETApp -pa `"$KeyName`" `"$PoolName`"";
+Invoke-Expression "$CommandString";
+# May need to do this in KC if access to key cannot be granted via the BUILTIN\IIS_IUSRS user group
+@(gci IIS:\AppPools | ? {$_.Name -ne 'DefaultAppPool'} | select name) | % {
+    $PoolName="IIS APPPOOL\$($_.name)";
+    "Adding Permissions for $PoolName";
+    $CommandString = "$ASPNETApp -pa `"$KeyName`" `"$PoolName`"";
+    Invoke-Expression "$CommandString";
+}
+
+<#
+	Add user permission to SSO cert for IRIS web services
+#>   
+Import-Module webadministration
+#
+# $certCN is the identifying CN for the certificate you wish to work with
+# The selection also sorts on Expiration date, just in case there are old expired certs still in the certificate store.
+#  Make sure we work with the most recent cert
+function Set-CertificatePermissions {
+	param (
+		[string] $certCN,
+		[string] $svcAcctName,
+		[string] $keyPath = "C:\ProgramData\Microsoft\Crypto\RSA\MachineKeys"
+	)
+
+	Try {
+		$WorkingCert = Get-ChildItem CERT:\LocalMachine\My | where {$_.Subject -match $certCN} | sort $_.NotAfter -Descending | select -first 1 -erroraction STOP;
+		$TPrint = $WorkingCert.Thumbprint;
+		$rsaFile = $WorkingCert.PrivateKey.CspKeyContainerInfo.UniqueKeyContainerName;
+	}
+	Catch {
+		"`tError: unable to locate certificate for $($CertCN)";
+		# Exit script;
+		Break;
+	}
+	
+	$fullPath = Join-Path -Path $keyPath -ChildPath $rsaFile;
+	$acl = Get-Acl -Path $fullPath;
+	$permission = "$SvcAcctName","Read","Allow";
+	$accessRule = new-object System.Security.AccessControl.FileSystemAccessRule $permission;
+	$acl.AddAccessRule($accessRule);
+	
+	Try {
+		Set-Acl $fullPath $acl;
+		"`tSuccess: ACL set on certificate with thumb-print: $TPrint";
+	}
+	Catch {
+		"`tError: unable to set ACL on certificate";
+		# Exit script;
+		Break;
+	}
+}
+
+# Add IIS_IUSRS user group for access to the key
+#$CertName = "HmkiPrdSSO1"
+$CertName = "HmkiTstSSO1"
+$UserOrGroupName="IIS_IUSRS";
+"Adding Permissions for $UserOrGroupName"; 
+Set-CertificatePermissions -certCN $CertName -svcAcctName $UserOrGroupName;
+# Add IIS:\AppPool account for access to the key
+@(gci IIS:\AppPools | ? {$_.Name -ne 'DefaultAppPool'} | select name) | % {
+    $PoolName="IIS APPPOOL\$($_.name)";
+    "Adding Permissions for $PoolName";
+	Set-CertificatePermissions -certCN $CertName -svcAcctName $PoolName;
+}
+
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3));
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+        '176' {    
+			# CFS web server only...
+			# Get application svc accts and assign Permissions to the imported encryption key
+			$KeyName = "HbcNonProdConfigKey";
+			#$KeyName = "HbcConfigKey";
+			$ASPNETApp="$ENV:HOMEDRIVE\Windows\Microsoft.NET\Framework\v4.0.30319\aspnet_regiis.exe";
+			$ServiceAcctName=("$($env:USERDOMAIN)\svc$($env:COMPUTERNAME)").ToLower();
+			write-warning "Adding Permissions for $ServiceAcctName";
+			$CommandString = "$ASPNETApp -pa `"$KeyName`" `"$ServiceAcctName`"";
+			Invoke-Expression "$CommandString";
+		}
+	}
+}
+
+
+#Set the net.tcp value on INTWS and EXTWS sites
+Import-Module WebAdministration;
+$Last3 = $(($env:computername).substring($($env:computername).length - 3, 3))
+if (($Last3 -ne $empty) -or ($Last3 -ne $null)) {
+    switch ($Last3) {
+        {$_ -in '517','175'} {            
+            #If EXTWS, INTWS
+            Write "Setting 'enabledProtocols' value to: http,net.tcp";
+            @(gci IIS:\Sites | ? {$_.Name -ne 'Default Web Site'}) | % {
+                $SiteName = $_.Name;
+                #Navigate SubSites (If Required)
+                if (($SiteName.toLower() -like 'extws') -or 
+                    ($SiteName.toLower() -like 'intws')){ 
+                    @(gci "IIS:\Sites\$($_.Name)" | ? {$_.Schema.Name -eq 'application'}) | % { 
+                        $SubSiteName = $_.Name;
+                        $enabledProtocolsValue = Get-ItemProperty IIS:\sites\$SiteName\$SubSiteName -name enabledProtocols | select Value;
+                        Write "$SiteName : $SubSiteName 'enabledProtocols' current value: $($enabledProtocolsValue.Value)";
+                        Write "Working on $SiteName : $SubSiteName`n`tSetting 'enabledProtocols' value to: http,net.tcp";
+                        Set-ItemProperty IIS:\sites\$SiteName\$SubSiteName -name enabledProtocols -Value "http,net.tcp";
+                    }
+                }
+            }
+        }
+    }
+}
+
+iisreset /stop
+
+(GET-WMIOBJECT –query "SELECT * from win32_logicaldisk where DriveType = '3'").DeviceID | % { if ($_ -eq 'D:') {$dataDrive=$_;}; if ($_ -eq 'E:') {$dataDrive=$_;}; }
+Import-Module WebAdministration;
+$UserOrGroupName="$env:COMPUTERNAME\IIS_IUSRS";
+Write-Warning "Updating File permissions for the IIS_IUSRS";
+Write-Warning "Adding Permissions for $UserOrGroupName user";
+$env_var=($env:computername).substring(0,3).ToUpper(); if ($env_var -eq 'CIP') { $env_var='PRD'; }
+$PathVar="$dataDrive\HBCApps\$env_var"; if (!(Test-Path -Path "$PathVar")) { New-Item -ItemType "directory" -path "$PathVar" -Force; }
+@("$ENV:HOMEDRIVE\inetpub\logs","$ENV:HOMEDRIVE\opt\ics\keys","$PathVar","$dataDrive\Security\CyberSource","$dataDrive\WebLogs","$dataDrive\WSLogging","$dataDrive\Inetpub\wwwroot\uploads") | % { $Parms = @("`"$_`"","/grant","`"$UserOrGroupName`":(OI)(CI)M"); icacls.exe $Parms; }
+
+Write-Warning "Updating File permissions for the app pool ids";
+@(gci IIS:\AppPools | ? {$_.Name -ne 'DefaultAppPool'} | select name) | % {
+    $PoolName="IIS APPPOOL\$($_.name)"; Write-Warning "Adding Permissions for $PoolName user";
+    $env_var=($env:computername).substring(0,3).ToUpper(); if ($env_var -eq 'CIP') { $env_var='PRD'; }
+    $PathVar="$dataDrive\HBCApps\$env_var"; if (!(Test-Path -Path "$PathVar")) { New-Item -ItemType "directory" -path "$PathVar" -Force; }
+    @("$ENV:HOMEDRIVE\inetpub\logs","$ENV:HOMEDRIVE\opt\ics\keys","$PathVar","$dataDrive\Security\CyberSource","$dataDrive\WebLogs","$dataDrive\WSLogging","$dataDrive\Inetpub\wwwroot\uploads") | % { $Parms = @("`"$_`"","/grant","`"$PoolName`":(OI)(CI)M"); icacls.exe $Parms; }
+}
+
+iisreset /start
+
+<## STOP HERE AND WAIT ##>
+
+# TODO - no run yet 2019-07-02
+# In TFS $/SDLC-Improvement/Trunk/Main/ConfigMgmt/Script_Resources/IIS
+#Run Site Update Scripts
+cd D:\Utilities\Scripts
+.\Set-IISAppPoolLoadUserProfile.ps1 -UserProfileLoaded $true
+.\Set-IIS_IRIS_AppPoolEnable32BitAppOnWin64.ps1
+.\Set-IIS_IRIS_AppPoolIdleTimeoutAction.ps1
+.\Set-IISAppPoolRecycleTimes.ps1
+
+
+# Install Required Fonts //TODO
+
+# Create key files
+    #(Prod)
+    D:\Security>
+    AES-Hallmark2010.key - rijndael AES
+    Iris-Prod-IR.key - Immediate Rewards + 3DES
+    Iris-Prod.key - 3DES
+
+    #(Non-Prod)
+    D:\Security>
+    AES-Hallmark2010.key - rijndael AES
+    Iris-NonProd-IR.key - Immediate Rewards  + 3DES
+    AES-NonProd.key - AES
+    Iris-NonProd.key - 3DES
+    
+$EntLibBaseXMLConfig = @"
+<configuration>
+<configSections>
+<section name="securityCryptographyConfiguration" type="Microsoft.Practices.EnterpriseLibrary.Security.Cryptography.Configuration.CryptographySettings, Microsoft.Practices.EnterpriseLibrary.Security.Cryptography, Version=5.0.414.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35" requirePermission="true" />
+</configSections>
+<securityCryptographyConfiguration>
+<symmetricCryptoProviders>
+</symmetricCryptoProviders>
+</securityCryptographyConfiguration>
+</configuration>
+"@
+echo $EntLibBaseXMLConfig > "$env:USERPROFILE\Desktop\temp_entlibbase.config"
+
+start D:\Installation\WebServer_Build_Requirements\MSEntLib50\EntLibConfig.exe
+start D:\Security
+
+D:\Security\AES-Cerner2013.key - cerner AES
+System.Security.Cryptography.AesManaged
+NPRD SALT: #{IN Offline PMP}
+PRD SALT:#{IN Offline PMP}
+ 
+D:\Security\AES-Hallmark2010.key - rijndael AES
+System.Security.Cryptography.AesManaged
+NPRD SALT: #{IN Offline PMP}
+IRIS PRD SALT: #{IN Offline PMP}
+Hallmark API Prod SALT: #{IN Offline PMP}
+
+Iris-Prod 3DES ###
+D:\Security\Iris-NonProd.key - 3DES
+D:\Security\Iris-Prod.key - 3DES
+System.Security.Cryptography.TripleDESCryptoServiceProvider
+NPRD SALT: #{IN Offline PMP}
+PRD SALT: #{IN Offline PMP}
+
+Immediate Rewards 3DES ###
+D:\Security\Iris-NonProd-IR.key
+D:\Security\Iris-Prod-IR.key
+System.Security.Cryptography.TripleDESCryptoServiceProvider
+NPRD SALT: #{IN Offline PMP}
+PRD SALT: #{IN Offline PMP}
+
+D:\Security\AES-NonProd.key - AES - unknown value
+
+Save config as temp_entlibbase.config on the desktop

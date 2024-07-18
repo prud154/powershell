@@ -1,0 +1,205 @@
+{
+    "appName": "accessmatrix",
+    "Environments": [
+        {
+            "name": "DEV",
+            "subscription": "",
+            "tiers": [
+                {
+                    "name": "reader",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                      
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Reader"
+                            ]
+                        }
+                      
+                    ]
+                },
+                {
+                    "name": "contributor",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Website Contributor",
+                                "Reader"
+                            ]
+                        }
+
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "QA",
+            "subscription": "",
+            "tiers": [
+                {
+                    "name": "reader",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                      
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Reader"
+                            ]
+                        }
+                      
+                    ]
+                },
+                {
+                    "name": "contributor",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Website Contributor",
+                                "Reader"
+                            ]
+                        }
+
+                    ]
+                }
+            ]
+        },
+		{
+            "name": "UAT",
+            "subscription": "",
+            "tiers": [
+                {
+                    "name": "reader",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                      
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Reader"
+                            ]
+                        }
+                      
+                    ]
+                },
+                {
+                    "name": "contributor",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Website Contributor",
+                                "Reader"
+                            ]
+                        }
+
+                    ]
+                }
+            ]
+        },
+		{
+            "name": "STG",
+            "subscription": "",
+            "tiers": [
+                {
+                    "name": "reader",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                      
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Reader"
+                            ]
+                        }
+                      
+                    ]
+                },
+                {
+                    "name": "contributor",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Website Contributor",
+                                "Reader"
+                            ]
+                        }
+
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "PROD",
+            "subscription": "",
+            "tiers": [
+                {
+                    "name": "reader",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                      
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Reader"
+                            ]
+                        }
+                      
+                    ]
+                },
+                {
+                    "name": "contributor",
+                    "members": [
+                        "",
+                        ""
+                    ],
+                    "resources": [
+                        {
+                            "resourceType": "ResourceGroup",
+                            "resourceAccessLevel": [
+                                "Website Contributor",
+                                "Reader"                                
+                            ]
+                        }
+
+                    ]
+                }
+            ]
+        }
+    ]
+}
